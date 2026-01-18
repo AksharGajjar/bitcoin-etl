@@ -4,6 +4,19 @@
 
 ---
 
+## Table of Contents
+
+1. [Architectural Decisions](#architectural-decisions-2026-01-17)
+2. [Infrastructure Management with Terraform](#infrastructure-management-with-terraform)
+3. [Code Patterns & Standards](#code-patterns--standards)
+4. [File Structure & Responsibilities](#file-structure--responsibilities)
+5. [Critical Implementation Notes](#critical-implementation-notes)
+6. [Testing Checklist](#testing-checklist)
+7. [Common Commands Reference](#common-commands-reference)
+8. [Next Steps](#next-steps-execution-order)
+
+---
+
 ## Architectural Decisions (2026-01-17)
 
 ### Error Handling Strategy
@@ -130,6 +143,331 @@ st.sidebar.download_button(
 ```
 
 **Rationale**: CSV for spreadsheets, JSON for APIs. Minimal code, nice portfolio feature.
+
+---
+
+## Infrastructure Management with Terraform
+
+### Why Terraform?
+
+**Decision**: Use Infrastructure as Code (IaC) with Terraform for all GCP resource management.
+
+**Benefits**:
+- **Reproducibility**: Same infrastructure every time, no manual console clicks
+- **Version Control**: Infrastructure changes tracked in git
+- **State Management**: Know what's deployed vs what's planned
+- **Cost Safety**: Review changes before applying (especially UTXO index)
+- **Team Collaboration**: Share infrastructure definitions across sessions
+- **Auditability**: See full history of infrastructure changes
+
+**Rationale**: Manual GCP Console operations are error-prone and not repeatable. Terraform ensures consistency and allows infrastructure changes to be reviewed before applying.
+
+---
+
+### Terraform Configuration Structure
+
+```
+terraform/
+├── provider.tf              # GCP provider configuration
+├── variables.tf             # Input variables (project_id, dataset, etc.)
+├── main.tf                  # BigQuery dataset and tables
+├── outputs.tf               # Useful outputs after deployment
+├── terraform.tfvars.example # Template for configuration
+├── terraform.tfvars         # Actual config (gitignored)
+└── README.md                # Terraform-specific docs
+```
+
+---
+
+### Quick Start Guide
+
+#### 1. Configure Terraform
+
+```bash
+cd terraform
+
+# Copy example configuration
+cp terraform.tfvars.example terraform.tfvars
+
+# Edit with your GCP project ID
+vim terraform.tfvars
+```
+
+**terraform.tfvars:**
+```hcl
+project_id = "your-gcp-project-id"  # ← REQUIRED: Your GCP project
+
+# Optional overrides (defaults are sensible)
+# region           = "us-central1"
+# dataset_location = "US"
+# dataset_id       = "bitcoin_analytics"
+
+# ⚠️ COST WARNING: Keep this false until ready ($25-50 cost)
+enable_utxo_index = false
+```
+
+#### 2. Initialize Terraform
+
+```bash
+# Download provider plugins and initialize backend
+terraform init
+```
+
+Expected output:
+```
+Terraform has been successfully initialized!
+```
+
+#### 3. Review the Plan
+
+```bash
+# See what Terraform will create (dry run)
+terraform plan
+```
+
+Expected resources:
+- `google_bigquery_dataset.bitcoin_analytics` - Dataset container
+- `google_bigquery_table.daily_prices` - Price data table
+- (Optional) `google_bigquery_table.utxo_index` - UTXO index (if enabled)
+
+#### 4. Deploy Infrastructure
+
+```bash
+# Apply the configuration
+terraform apply
+
+# Review the plan, type 'yes' to confirm
+```
+
+Output shows:
+```
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+dataset_id = "bitcoin_analytics"
+daily_prices_table = "your-project.bitcoin_analytics.daily_prices"
+next_steps = "..."
+```
+
+#### 5. (Later) Enable UTXO Index
+
+**⚠️ WARNING**: This step costs ~$25-50 in BigQuery processing.
+
+```bash
+# Edit terraform.tfvars
+vim terraform.tfvars
+# Change: enable_utxo_index = true
+
+# Review what will be added
+terraform plan
+
+# Apply the change
+terraform apply
+```
+
+---
+
+### Terraform Variables Reference
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `project_id` | string | **REQUIRED** | GCP project ID |
+| `region` | string | `us-central1` | GCP region |
+| `dataset_location` | string | `US` | BigQuery dataset location |
+| `dataset_id` | string | `bitcoin_analytics` | BigQuery dataset name |
+| `utxo_start_date` | string | `2019-01-01` | Start date for UTXO index |
+| `dust_threshold` | number | `0.0001` | Min BTC value to include |
+| `enable_utxo_index` | bool | `false` | Create UTXO index (costs $25-50) |
+
+---
+
+### Terraform Best Practices
+
+**DO:**
+- ✓ Keep `terraform.tfvars` out of git (already in .gitignore)
+- ✓ Run `terraform plan` before `apply`
+- ✓ Use `terraform fmt` to format configuration files
+- ✓ Review state with `terraform show`
+- ✓ Comment variable overrides in terraform.tfvars
+
+**DON'T:**
+- ✗ Don't manually modify resources in GCP Console (defeats IaC purpose)
+- ✗ Don't commit `terraform.tfstate` to git (contains sensitive data)
+- ✗ Don't commit `terraform.tfvars` to git (contains project IDs)
+- ✗ Don't enable `enable_utxo_index` without budget approval
+- ✗ Don't run `terraform destroy` in production without backup
+
+---
+
+### Terraform Commands Cheat Sheet
+
+```bash
+# Initialize (run once, or after adding providers)
+terraform init
+
+# Format code
+terraform fmt
+
+# Validate configuration
+terraform validate
+
+# Preview changes (dry run)
+terraform plan
+
+# Apply changes
+terraform apply
+
+# Apply without confirmation prompt
+terraform apply -auto-approve
+
+# Show current state
+terraform show
+
+# List resources
+terraform state list
+
+# Get specific output value
+terraform output dataset_id
+
+# Destroy all infrastructure (⚠️ DESTRUCTIVE)
+terraform destroy
+```
+
+---
+
+### Cost Control with Terraform
+
+**UTXO Index Conditional Creation**:
+```hcl
+resource "google_bigquery_table" "utxo_index" {
+  count = var.enable_utxo_index ? 1 : 0
+  # ... table configuration ...
+}
+```
+
+**How it works**:
+- `enable_utxo_index = false` → 0 instances created (no cost)
+- `enable_utxo_index = true` → 1 instance created (triggers ~$25-50 cost)
+- Change is visible in `terraform plan` before applying
+
+**Workflow**:
+1. Initial deployment: `enable_utxo_index = false` (creates dataset + daily_prices only)
+2. Load price data: `python etl/load_prices.py`
+3. Test queries with sample data
+4. When ready: Set `enable_utxo_index = true`, run `terraform plan`
+5. Review cost impact in plan output
+6. Apply: `terraform apply`
+
+---
+
+### Terraform State Management
+
+**Local State** (default):
+- State file: `terraform/terraform.tfstate`
+- Stored locally (gitignored)
+- Contains resource IDs, metadata, sensitive data
+- **Backup**: Run `cp terraform.tfstate terraform.tfstate.backup` before major changes
+
+**Remote State** (optional, for teams):
+```hcl
+# Add to provider.tf for GCS backend
+terraform {
+  backend "gcs" {
+    bucket = "your-project-terraform-state"
+    prefix = "bitcoin-sopr"
+  }
+}
+```
+
+---
+
+### Common Terraform Issues & Solutions
+
+**Issue**: "Error creating Dataset: googleapi: Error 409: Already Exists"
+```bash
+# Import existing resource
+terraform import google_bigquery_dataset.bitcoin_analytics PROJECT_ID:bitcoin_analytics
+```
+
+**Issue**: "Error locking state"
+```bash
+# Remove stale lock (if you're sure no other process is running)
+terraform force-unlock LOCK_ID
+```
+
+**Issue**: "Access Denied: User does not have permission"
+```bash
+# Grant yourself BigQuery Admin role
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="user:YOUR_EMAIL" \
+  --role="roles/bigquery.admin"
+
+# Or use service account
+gcloud auth application-default login
+```
+
+**Issue**: Changes not detected after manual GCP Console edits
+```bash
+# Refresh state from actual infrastructure
+terraform refresh
+
+# Or re-import the resource
+terraform import RESOURCE_TYPE.RESOURCE_NAME RESOURCE_ID
+```
+
+---
+
+### Terraform Workflow Integration
+
+**With Git**:
+```bash
+# Create feature branch for infrastructure changes
+git checkout -b akshar/add-utxo-index
+
+# Make Terraform changes
+vim terraform/main.tf
+
+# Format and validate
+terraform fmt
+terraform validate
+
+# Preview changes
+terraform plan
+
+# Apply
+terraform apply
+
+# Commit infrastructure code (NOT state files)
+git add terraform/*.tf
+git commit -m "add: UTXO index table configuration"
+git push origin akshar/add-utxo-index
+
+# Create PR
+gh pr create --fill
+```
+
+**With Phase Workflow**:
+- Phase 0: Manual GCP setup (project, APIs)
+- **Phase 1: Terraform deployment** (dataset + tables)
+- Phase 2: Load price data (ETL)
+- Phase 3: Create UTXO index (enable in Terraform)
+- Phases 4-7: Application development
+
+---
+
+### Terraform vs Manual Alternatives
+
+| Task | Manual Approach | Terraform Approach |
+|------|----------------|-------------------|
+| Create dataset | `bq mk bitcoin_analytics` | `terraform apply` |
+| Create table | `bq mk --table` + schema JSON | Resource definition in `main.tf` |
+| Update schema | `bq update` or recreate | Edit `main.tf`, run `terraform apply` |
+| Delete resources | `bq rm` (risky, no confirmation) | `terraform destroy` (shows plan first) |
+| Audit changes | No history | Git history of `.tf` files |
+| Replicate setup | Manual steps, error-prone | `terraform apply` (identical) |
+
+**Verdict**: Terraform wins for repeatability, safety, and collaboration.
 
 ---
 

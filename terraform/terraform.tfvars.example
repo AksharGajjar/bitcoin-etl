@@ -1,0 +1,18 @@
+# terraform.tfvars.example
+# Copy this file to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars to git!
+
+# REQUIRED: Your GCP project ID
+project_id = "bitcoin-sopr-etl"
+
+# OPTIONAL: Override defaults if needed
+# region           = "us-central1"
+# dataset_location = "US"
+# dataset_id       = "bitcoin_analytics"
+# utxo_start_date  = "2019-01-01"
+# dust_threshold   = 0.0001
+
+# ⚠️ COST WARNING: Setting this to true will create the UTXO index
+# This scans 1TB+ of Bitcoin blockchain data and costs ~$25-50
+# Only enable this when you're ready to incur the cost
+enable_utxo_index = false
