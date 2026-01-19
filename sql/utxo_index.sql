@@ -7,8 +7,8 @@ CREATE OR REPLACE TABLE `{project_id}.bitcoin_analytics.utxo_index`
 PARTITION BY block_date
 CLUSTER BY tx_hash
 AS
-SELECT 
-    hash AS tx_hash
+SELECT
+    `hash` AS tx_hash
     , o.index AS output_index
     , DATE(block_timestamp) AS block_date
     , block_timestamp AS created_at

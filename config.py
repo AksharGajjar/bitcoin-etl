@@ -5,7 +5,13 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from bitcoin-sopr-dashboard directory
+PROJECT_ROOT = Path(__file__).parent
+ENV_PATH = PROJECT_ROOT / "bitcoin-sopr-dashboard" / ".env"
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH)
+else:
+    load_dotenv()  # Fallback to default
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent

@@ -7,26 +7,35 @@ from datetime import datetime, timedelta
 
 def generate_sample_sopr_data(days: int = 30) -> pd.DataFrame:
     """
-    Generate realistic-looking SOPR data for testing.
-    SOPR typically oscillates between 0.85 and 1.15.
+    Generate realistic-looking aSOPR data for testing.
+    aSOPR typically oscillates between 0.85 and 1.15.
+    Includes total_btc_moved and num_transactions for validation.
     """
     import random
     random.seed(42)  # Reproducible
-    
+
     end_date = datetime.now().date()
     dates = [end_date - timedelta(days=i) for i in range(days)]
-    
+
     # Generate SOPR values that oscillate around 1.0
     sopr_values = []
+    btc_moved = []
+    num_txs = []
     current = 1.0
-    for _ in range(days):
+    for i in range(days):
         change = random.uniform(-0.03, 0.03)
         current = max(0.85, min(1.15, current + change))
         sopr_values.append(round(current, 4))
-    
+        # Realistic daily BTC movement (50k-200k BTC/day)
+        btc_moved.append(round(random.uniform(50000, 200000), 2))
+        # Realistic transaction count (200k-500k/day)
+        num_txs.append(random.randint(200000, 500000))
+
     return pd.DataFrame({
         'date': dates,
-        'sopr': sopr_values
+        'sopr': sopr_values,
+        'total_btc_moved': btc_moved,
+        'num_transactions': num_txs
     })
 
 # Pre-generated sample for quick imports

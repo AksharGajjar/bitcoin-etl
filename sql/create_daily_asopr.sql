@@ -1,32 +1,22 @@
--- sopr_query.sql
--- Calculates daily Adjusted SOPR (aSOPR)
--- Filters out coins spent within 1 hour of creation (removes exchange noise)
--- Uses value-weighted calculation for accurate market sentiment
--- Parameters: @start_date, @end_date (DATE type)
--- Returns: date, sopr, total_btc_moved
+-- create_daily_asopr.sql
+-- Creates a cached table of daily Adjusted SOPR values
+-- Reads from daily_spends (cached) and utxo_index (cached)
+-- ⚠️ ONE-TIME COST: ~$2 (joins our cached tables)
+-- After creation, dashboard queries are essentially FREE
 
-WITH spends AS (
-    -- Get all inputs (spent outputs) in the date range
-    SELECT
-        t.block_timestamp AS spend_timestamp
-        , i.spent_transaction_hash
-        , i.spent_output_index
-    FROM `bigquery-public-data.crypto_bitcoin.transactions` t
-        , UNNEST(t.inputs) i
-    WHERE DATE(t.block_timestamp) BETWEEN @start_date AND @end_date
-        AND i.spent_transaction_hash IS NOT NULL
-)
-
-, spend_with_origin AS (
+CREATE OR REPLACE TABLE `{project_id}.bitcoin_analytics.daily_asopr`
+PARTITION BY date
+AS
+WITH spend_with_origin AS (
     -- Join spends with their original creation data
     SELECT
         s.spend_timestamp
+        , s.spend_date
         , c.created_at AS creation_timestamp
-        , c.btc_amount
-        , DATE(s.spend_timestamp) AS spend_date
         , c.block_date AS creation_date
+        , c.btc_amount
         , TIMESTAMP_DIFF(s.spend_timestamp, c.created_at, HOUR) AS hours_held
-    FROM spends s
+    FROM `{project_id}.bitcoin_analytics.daily_spends` s
     INNER JOIN `{project_id}.bitcoin_analytics.utxo_index` c
         ON s.spent_transaction_hash = c.tx_hash
         AND s.spent_output_index = c.output_index
@@ -45,9 +35,12 @@ WITH spends AS (
 SELECT
     a.spend_date AS date
     -- aSOPR = Realized Value / Realized Cap (value-weighted)
-    , SUM(a.btc_amount * p_sold.close) / NULLIF(SUM(a.btc_amount * p_bought.close), 0) AS sopr
-    -- Additional metrics for validation
-    , SUM(a.btc_amount) AS total_btc_moved
+    , SAFE_DIVIDE(
+        SUM(a.btc_amount * p_sold.close),
+        SUM(a.btc_amount * p_bought.close)
+    ) AS sopr
+    -- Additional metrics
+    , SUM(a.btc_amount) / 100000000 AS total_btc_moved  -- Convert satoshis to BTC
     , COUNT(*) AS num_transactions
 FROM adjusted_spends a
 INNER JOIN `{project_id}.bitcoin_analytics.daily_prices` p_sold
@@ -55,5 +48,4 @@ INNER JOIN `{project_id}.bitcoin_analytics.daily_prices` p_sold
 INNER JOIN `{project_id}.bitcoin_analytics.daily_prices` p_bought
     ON a.creation_date = p_bought.date
 GROUP BY 1
-ORDER BY 1 DESC
 ;

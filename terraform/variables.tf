@@ -41,3 +41,9 @@ variable "enable_utxo_index" {
   type        = bool
   default     = false
 }
+
+variable "enable_scheduled_queries" {
+  description = "Whether to enable daily scheduled queries for aSOPR pipeline (~$0.05/day)"
+  type        = bool
+  default     = false
+}
